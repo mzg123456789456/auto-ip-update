@@ -12,7 +12,7 @@
     "remark": "CT"
   },
   {
-    "url": "https://addressesapi.090227.xyz/cmcc-ipv6",
+    "url": "https://cf.090227.xyz/ct?ips=6",
     "remark": "CMCC"
   },
   {
@@ -20,7 +20,7 @@
     "remark": "CloudFlareYes"
   },
   {
-    "url": "https://ip.164746.xyz/",
+    "url": "https://cf.090227.xyz/cmcc?ips=810",
     "remark": "ip.164746.xyz"
   },
   {
@@ -28,8 +28,9 @@
     "remark": "030101.xyz"
   },
   {
-    "url": "https://ipdb.api.030101.xyz/?type=bestcf&country=true",
+    "url": "https://cf.090227.xyz/cu?ips=10",
     "remark": "ipdb.api.030101.xyz"
   }
 ]
+
 
