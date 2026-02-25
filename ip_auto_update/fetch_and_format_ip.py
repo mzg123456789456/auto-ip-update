@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import time
 from urllib3.exceptions import InsecureRequestWarning
+import socket
 
 # 禁用SSL警告
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
@@ -75,24 +76,83 @@ def extract_port_from_line(line):
         return int(port_match.group(1))
     return 443  # 默认端口
 
-def test_ip_connectivity(ip, port=443, timeout=3):
-    """测试IP连通性"""
+def test_tcp_connectivity(ip, port=443, timeout=3):
+    """测试TCP连接延迟"""
     try:
-        # 测试HTTPS连接
-        url = f"https://{ip}:{port}"
         start_time = time.time()
-        response = requests.get(url, timeout=timeout, verify=False, allow_redirects=False)
-        elapsed = time.time() - start_time
+        # 创建socket连接
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
         
-        # 检查响应状态（200-399表示成功）
-        if 200 <= response.status_code < 400:
-            return True, round(elapsed * 1000)  # 返回延迟（毫秒）
+        # 尝试连接
+        result = sock.connect_ex((ip, port))
+        end_time = time.time()
+        sock.close()
+        
+        if result == 0:  # 连接成功
+            delay = int((end_time - start_time) * 1000)  # 转换为毫秒
+            # 确保最小延迟为1ms
+            return True, max(1, delay)
+        return False, None
+    except Exception:
+        return False, None
+
+def test_http_connectivity(ip, port=443, timeout=3):
+    """测试HTTP/HTTPS连接延迟"""
+    try:
+        start_time = time.time()
+        
+        # 根据端口选择协议
+        protocol = 'https' if port == 443 else 'http'
+        url = f"{protocol}://{ip}:{port}"
+        
+        # 发送HEAD请求（比GET更快）
+        response = requests.head(
+            url, 
+            timeout=timeout, 
+            verify=False, 
+            allow_redirects=False,
+            headers={'User-Agent': 'Mozilla/5.0'}
+        )
+        
+        end_time = time.time()
+        delay = int((end_time - start_time) * 1000)  # 转换为毫秒
+        
+        # 任何响应都认为是成功的（包括404）
+        if response.status_code:
+            return True, max(1, delay)  # 确保最小延迟为1ms
         return False, None
     except requests.exceptions.Timeout:
         return False, None
     except requests.exceptions.ConnectionError:
         return False, None
     except Exception:
+        return False, None
+
+def test_ip_connectivity(ip, port=443, timeout=3, test_method='both'):
+    """综合测试IP连通性"""
+    
+    # 先测试TCP连接（更快）
+    tcp_success, tcp_delay = test_tcp_connectivity(ip, port, timeout)
+    
+    if not tcp_success:
+        return False, None
+    
+    # 如果只需要TCP测试，直接返回
+    if test_method == 'tcp':
+        return True, tcp_delay
+    
+    # 再进行HTTP测试（获取更准确的延迟）
+    http_success, http_delay = test_http_connectivity(ip, port, timeout)
+    
+    if http_success:
+        # 综合两种测试的延迟，取平均值
+        avg_delay = int((tcp_delay + http_delay) / 2)
+        return True, avg_delay
+    elif test_method == 'both':
+        # 如果HTTP失败但TCP成功，返回TCP延迟
+        return True, tcp_delay
+    else:
         return False, None
 
 def process_single_line(line, remark):
@@ -108,16 +168,19 @@ def process_single_line(line, remark):
     
     port = extract_port_from_line(formatted_line)
     
-    # 测试连通性
-    is_connected, delay = test_ip_connectivity(ip, port)
+    # 测试连通性（使用综合测试方法）
+    is_connected, delay = test_ip_connectivity(ip, port, timeout=3, test_method='both')
     
-    if is_connected:
-        # 在备注中添加延迟信息
-        if '#' in formatted_line:
-            base, remark_part = formatted_line.split('#', 1)
+    if is_connected and delay:
+        # 移除可能已存在的延迟信息
+        base_line = re.sub(r'\s*\|\s*\d+ms', '', formatted_line)
+        
+        # 添加新的延迟信息
+        if '#' in base_line:
+            base, remark_part = base_line.split('#', 1)
             return f"{base}#{remark_part} | {delay}ms"
         else:
-            return f"{formatted_line} | {delay}ms"
+            return f"{base_line} | {delay}ms"
     
     return None
 
@@ -181,6 +244,7 @@ def process_api(api):
         print(f"【{api['remark']}】获取到 {len(lines)} 条IP，正在进行连通性测试...")
         
         # 使用线程池并发测试连通性
+        success_count = 0
         with ThreadPoolExecutor(max_workers=20) as executor:
             future_to_line = {
                 executor.submit(process_single_line, line, api['remark']): line 
@@ -192,10 +256,14 @@ def process_api(api):
                     result = future.result(timeout=10)
                     if result:
                         api_results.append(result)
+                        success_count += 1
+                        # 实时显示进度
+                        if success_count % 10 == 0:
+                            print(f"【{api['remark']}】已测试通过 {success_count} 条...")
                 except Exception as e:
                     continue
         
-        print(f"【{api['remark']}】通过连通性测试: {len(api_results)} 条")
+        print(f"【{api['remark']}】通过连通性测试: {success_count}/{len(lines)} 条")
         
     except Exception as e:
         print(f"【{api['remark']}】获取失败: {e}")
@@ -244,6 +312,10 @@ def main():
         api_results = process_api(api)
         all_results.extend(api_results)
     
+    if not all_results:
+        print("没有获取到任何可用的IP")
+        return
+    
     # 去重
     print(f"\n去重前: {len(all_results)} 条")
     unique_results = remove_duplicates(all_results)
@@ -258,10 +330,25 @@ def main():
     
     print(f"\n已完成！共 {len(sorted_results)} 条有效IP写入 {OUTPUT_FILE}")
     
+    # 打印延迟统计
+    delays = []
+    for line in sorted_results:
+        delay_match = re.search(r'(\d+)ms', line)
+        if delay_match:
+            delays.append(int(delay_match.group(1)))
+    
+    if delays:
+        print(f"\n延迟统计:")
+        print(f"  最小延迟: {min(delays)}ms")
+        print(f"  最大延迟: {max(delays)}ms")
+        print(f"  平均延迟: {sum(delays)//len(delays)}ms")
+    
     # 打印前10条最快的IP
     print("\n最快的10个IP：")
     for i, line in enumerate(sorted_results[:10], 1):
         print(f"{i}. {line}")
 
 if __name__ == '__main__':
+    print("开始获取优选IP...")
+    print("=" * 50)
     main()
