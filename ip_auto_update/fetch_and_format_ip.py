@@ -343,9 +343,9 @@ def main():
         print(f"  最大延迟: {max(delays)}ms")
         print(f"  平均延迟: {sum(delays)//len(delays)}ms")
     
-    # 打印前10条最快的IP
-    print("\n最快的10个IP：")
-    for i, line in enumerate(sorted_results[:10], 1):
+    # 打印前25条最快的IP
+    print("\n最快的25个IP：")
+    for i, line in enumerate(sorted_results[:25], 1):
         print(f"{i}. {line}")
 
 if __name__ == '__main__':
