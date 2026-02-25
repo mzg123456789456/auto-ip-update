@@ -30,9 +30,6 @@
   {
     "url": "https://ipdb.api.030101.xyz/?type=bestcf&country=true",
     "remark": "ipdb.api.030101.xyz"
-  },
-  {
-    "url": "https://ipdb.api.030101.xyz/?type=bestproxy&country=true",
-    "remark": "bestproxy"
   }
 ]
+
